@@ -64,7 +64,7 @@ def run_complete_analysis(data_path, alignment_type, output_dir, n_bootstrap=100
         print()
 
     # 3. Aspect Ratio Analysis (both)
-    if 'relative_scale_ratios' in analyzer.available_analyses:
+    if 'aspect_ratios' in analyzer.available_analyses:
         print("3. ASPECT RATIO ANALYSIS (Height/Width)")
         print("-" * 50)
         aspect_results = analyzer.analyze_relative_scale_ratios()
@@ -76,6 +76,32 @@ def run_complete_analysis(data_path, alignment_type, output_dir, n_bootstrap=100
                        if data.get('statistical_results', {}).get('significant', False))
         print(f"✓ Found {sig_count} significant aspect ratio changes")
         all_results['aspect_ratios'] = aspect_results
+        print()
+
+    # 4. Relative Bone Ratios (global only)
+    if 'relative_ratios' in analyzer.available_analyses:
+        print("4. RELATIVE BONE RATIO ANALYSIS (Inter-bone)")
+        print("-" * 50)
+        relative_results = analyzer.analyze_relative_bone_ratios()
+        analyzer.export_results_to_csv(relative_results, f"{output_dir}/relative_ratios")
+
+        # Show summary
+        by_disease = relative_results['comparisons'].get('by_disease', {})
+        sig_count = sum(1 for key, data in by_disease.items()
+                       if data.get('statistical_results', {}).get('significant', False))
+        print(f"✓ Found {sig_count} significant inter-bone ratio changes")
+
+        # Show top results
+        sig_results = [(key, data) for key, data in by_disease.items()
+                      if data.get('statistical_results', {}).get('significant', False)]
+        if sig_results:
+            print("\nTop significant regional relationships:")
+            for key, data in sig_results[:3]:
+                stats = data['statistical_results']
+                print(f"  • {data['bone_pair_label']}: {data['ratio_change']:.3f}x "
+                      f"in {data['target_group']} (p={stats['p_value']:.3f})")
+
+        all_results['relative_ratios'] = relative_results
         print()
 
     print(f"\n{'='*70}")
@@ -124,9 +150,10 @@ def main():
     print("  • Translation patterns (inter-bone positioning)")
     print("  • Rotation patterns (bone orientations)")
     print("  • Aspect ratios (bone elongation)")
+    print("  • Relative bone ratios (regional relationships)")
 
     print("\nBONEWISE ALIGNMENT provides:")
-    print("  • Aspect ratios (pure shape elongation, no positioning bias)")
+    print("  • Aspect ratios (pure shape elongation, no inter-bone bias)")
 
     print("\n" + "="*70)
     print(" All analyses complete! Check complete_results/ for outputs")

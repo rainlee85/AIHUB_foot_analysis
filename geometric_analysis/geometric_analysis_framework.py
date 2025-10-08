@@ -187,10 +187,10 @@ class GeometricAnalyzer:
 
         # Validate alignment type and set available analyses
         if alignment_type == "bonewise":
-            self.available_analyses = ["relative_scale_ratios", "shape_deformation", "bone_specific"]
-            logger.info("Bonewise alignment: Translation/rotation analyses disabled (bones individually aligned)")
+            self.available_analyses = ["aspect_ratios", "shape_deformation", "bone_specific"]
+            logger.info("Bonewise alignment: Only aspect ratios available (bones individually aligned)")
         elif alignment_type == "global":
-            self.available_analyses = ["translation", "rotation", "relative_scale_ratios", "shape_deformation"]
+            self.available_analyses = ["translation", "rotation", "aspect_ratios", "relative_ratios", "shape_deformation"]
             logger.info("Global alignment: All geometric analyses available")
         else:
             raise ValueError("alignment_type must be 'bonewise' or 'global'")
@@ -821,6 +821,156 @@ class GeometricAnalyzer:
         for i, (comp_type, key) in enumerate(pval_locations):
             results['comparisons'][comp_type][key]['statistical_results']['p_value_fdr'] = pvals_corrected[i]
             results['comparisons'][comp_type][key]['statistical_results']['significant_fdr'] = rejected[i]
+
+    def compute_bone_sizes(self) -> pd.DataFrame:
+        """
+        Compute centroid sizes for inter-bone ratio analysis
+
+        Returns:
+            DataFrame with bone sizes per subject
+        """
+        if self.data is None:
+            raise ValueError("Data not loaded. Call load_data() first.")
+
+        bone_sizes = []
+
+        for subject_id in self.data['subject_id'].unique():
+            subject_data = self.data[self.data['subject_id'] == subject_id]
+            metadata = subject_data.iloc[0]
+
+            subject_sizes = {
+                'subject_id': subject_id,
+                'label_disease': metadata.get('label_disease', 'Unknown'),
+                'label_category': metadata.get('label_category', 'Unknown')
+            }
+
+            for ap in self.ap_list:
+                bone_coords = self.extract_bone_coordinates(subject_id, ap)
+
+                if len(bone_coords) > 1:
+                    # Centroid size (RMS distance from centroid)
+                    centroid = np.mean(bone_coords, axis=0)
+                    distances = np.linalg.norm(bone_coords - centroid, axis=1)
+                    centroid_size = np.sqrt(np.mean(distances**2))
+                    subject_sizes[f'{ap}_size'] = centroid_size
+                else:
+                    subject_sizes[f'{ap}_size'] = np.nan
+
+            bone_sizes.append(subject_sizes)
+
+        return pd.DataFrame(bone_sizes)
+
+    def analyze_relative_bone_ratios(self) -> Dict:
+        """
+        Analyze relative size ratios between bones (e.g., forefoot/hindfoot)
+        Reveals regional biomechanical relationships
+
+        Returns:
+            Dict with inter-bone ratio statistical comparisons
+        """
+        logger.info("Analyzing relative bone-to-bone ratios...")
+
+        # Compute bone sizes
+        sizes_df = self.compute_bone_sizes()
+
+        if sizes_df.empty:
+            raise ValueError("No bone size data computed")
+
+        results = {
+            'method': 'Relative Bone Ratio Analysis',
+            'description': 'Inter-bone size ratios revealing regional relationships',
+            'comparisons': {}
+        }
+
+        # Define clinically meaningful bone pairs
+        bone_pairs = [
+            ('AP1', 'AP2', 'Calcaneus/Talus'),
+            ('AP3', 'AP4', 'Cuboid/Navicular'),
+            ('AP1', 'AP5', 'Hindfoot/Midfoot'),
+            ('AP5', 'AP7', 'Midfoot/Forefoot'),
+            ('AP1', 'AP7', 'Hindfoot/Forefoot'),
+            ('AP2', 'AP4', 'Talus/Navicular'),
+        ]
+
+        # Define comparison groups
+        comparisons = [
+            ('Normal', 'by_disease'),
+            ('Normal', 'by_category')
+        ]
+
+        for base_group, comparison_type in comparisons:
+            results['comparisons'][comparison_type] = {}
+
+            for ap1, ap2, label in bone_pairs:
+                ratio_col = f'{ap1}_{ap2}_ratio'
+
+                # Compute ratios
+                valid_data = sizes_df.dropna(subset=[f'{ap1}_size', f'{ap2}_size']).copy()
+                if len(valid_data) < 4:
+                    continue
+
+                valid_data[ratio_col] = valid_data[f'{ap1}_size'] / valid_data[f'{ap2}_size']
+
+                # Remove invalid ratios
+                valid_data = valid_data[np.isfinite(valid_data[ratio_col])]
+                if len(valid_data) < 4:
+                    continue
+
+                # Get base group
+                base_mask = valid_data['label_disease'] == base_group
+                if not base_mask.any():
+                    continue
+
+                base_ratios = valid_data[base_mask][ratio_col].values.reshape(-1, 1)
+
+                # Test against each disease/category
+                target_groups = (valid_data['label_disease'].unique()
+                               if comparison_type == 'by_disease'
+                               else valid_data['label_category'].unique())
+
+                for target_group in target_groups:
+                    if target_group == base_group:
+                        continue
+
+                    target_mask = (valid_data['label_disease'] == target_group
+                                 if comparison_type == 'by_disease'
+                                 else valid_data['label_category'] == target_group)
+
+                    if not target_mask.any():
+                        continue
+
+                    target_ratios = valid_data[target_mask][ratio_col].values.reshape(-1, 1)
+
+                    if len(base_ratios) < 2 or len(target_ratios) < 2:
+                        continue
+
+                    # Statistical analysis
+                    comparison_name = f"{base_group}_vs_{target_group}"
+
+                    ratio_stats = self.stats_framework.comprehensive_test(
+                        base_ratios, target_ratios,
+                        comparison_name=f"{ratio_col}_{comparison_name}"
+                    )
+
+                    # Store results
+                    key = f"{ap1}_{ap2}_{target_group}"
+                    results['comparisons'][comparison_type][key] = {
+                        'bone_pair': f"{ap1}/{ap2}",
+                        'bone_pair_label': label,
+                        'comparison': comparison_name,
+                        'base_group': base_group,
+                        'target_group': target_group,
+                        'base_mean_ratio': np.mean(base_ratios),
+                        'target_mean_ratio': np.mean(target_ratios),
+                        'ratio_change': np.mean(target_ratios) / np.mean(base_ratios),
+                        'statistical_results': ratio_stats
+                    }
+
+        # Apply FDR correction
+        self._apply_fdr_correction_ratios(results)
+
+        logger.info(f"Relative bone ratio analysis complete. Analyzed {len(bone_pairs)} bone pairs.")
+        return results
 
     def analyze_shape_deformation(self) -> Dict:
         """
