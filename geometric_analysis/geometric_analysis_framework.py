@@ -440,32 +440,24 @@ class GeometricAnalyzer:
             results['comparisons'][comp_type][key][coord_type]['p_value_fdr'] = pvals_corrected[i]
             results['comparisons'][comp_type][key][coord_type]['significant_fdr'] = rejected[i]
 
-    def analyze_rotation_patterns(self) -> Dict:
+    def compute_bone_orientations(self) -> pd.DataFrame:
         """
-        Analyze orientation changes using principal axis analysis
-        Reveals how bones rotate relative to anatomical axes
-        """
-        # Implementation placeholder - waiting for user input
-        pass
-
-    def compute_bone_sizes(self) -> pd.DataFrame:
-        """
-        Compute size measures for each bone in each subject
-        Uses centroid size (root mean square distance from centroid)
+        Compute principal axis orientation for each bone in each subject
+        Uses PCA to find major axis direction
 
         Returns:
-            DataFrame with bone sizes per subject
+            DataFrame with bone orientations (angles) per subject
         """
         if self.data is None:
             raise ValueError("Data not loaded. Call load_data() first.")
 
-        bone_sizes = []
+        orientations = []
 
         for subject_id in self.data['subject_id'].unique():
             subject_data = self.data[self.data['subject_id'] == subject_id]
             metadata = subject_data.iloc[0]
 
-            subject_sizes = {
+            subject_orientations = {
                 'subject_id': subject_id,
                 'label_disease': metadata.get('label_disease', 'Unknown'),
                 'label_category': metadata.get('label_category', 'Unknown')
@@ -474,60 +466,59 @@ class GeometricAnalyzer:
             for ap in self.ap_list:
                 bone_coords = self.extract_bone_coordinates(subject_id, ap)
 
-                if len(bone_coords) > 1:
-                    # Compute centroid size
+                if len(bone_coords) > 2:
+                    # Compute PCA to get principal axis
                     centroid = np.mean(bone_coords, axis=0)
-                    distances = np.linalg.norm(bone_coords - centroid, axis=1)
-                    centroid_size = np.sqrt(np.mean(distances**2))
-                    subject_sizes[f'{ap}_size'] = centroid_size
+                    centered_coords = bone_coords - centroid
+
+                    # Compute covariance matrix
+                    cov_matrix = np.cov(centered_coords.T)
+
+                    # Get eigenvectors (principal components)
+                    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+
+                    # Principal axis is eigenvector with largest eigenvalue
+                    principal_axis = eigenvectors[:, -1]
+
+                    # Compute orientation angle (in radians)
+                    orientation_angle = np.arctan2(principal_axis[1], principal_axis[0])
+
+                    subject_orientations[f'{ap}_orientation'] = orientation_angle
+                    subject_orientations[f'{ap}_anisotropy'] = eigenvalues[-1] / (eigenvalues[0] + 1e-10)
                 else:
-                    subject_sizes[f'{ap}_size'] = np.nan
+                    subject_orientations[f'{ap}_orientation'] = np.nan
+                    subject_orientations[f'{ap}_anisotropy'] = np.nan
 
-            bone_sizes.append(subject_sizes)
+            orientations.append(subject_orientations)
 
-        return pd.DataFrame(bone_sizes)
+        return pd.DataFrame(orientations)
 
-    def analyze_relative_scale_ratios(self) -> Dict:
+    def analyze_rotation_patterns(self) -> Dict:
         """
-        Analyze relative bone size ratios after Procrustes normalization
-        Reveals differential growth/atrophy patterns between bones
+        Analyze orientation changes using principal axis analysis
+        Reveals how bones rotate relative to anatomical axes
 
         Returns:
-            Dict with bone-to-bone size ratios and statistical comparisons
+            Dict with statistical results for bone orientations
         """
-        logger.info("Analyzing relative scale ratios...")
+        if 'rotation' not in self.available_analyses:
+            raise ValueError("Rotation analysis only available for global alignment")
 
-        # Compute bone sizes
-        sizes_df = self.compute_bone_sizes()
+        logger.info("Analyzing rotation patterns...")
 
-        if sizes_df.empty:
-            raise ValueError("No bone size data computed")
+        # Compute bone orientations
+        orientations_df = self.compute_bone_orientations()
+
+        if orientations_df.empty:
+            raise ValueError("No orientation data computed")
 
         results = {
-            'method': 'Relative Scale Ratio Analysis',
-            'description': 'Bone size ratios after Procrustes normalization revealing differential patterns',
+            'method': 'Rotation Analysis - Principal Axis Orientation',
+            'description': 'Bone orientation changes relative to anatomical axes',
             'comparisons': {}
         }
 
-        # Define bone pairs for ratio analysis
-        bone_pairs = [
-            ('AP1', 'AP2'),  # Calcaneus vs Talus
-            ('AP3', 'AP4'),  # Cuboid vs Navicular
-            ('AP5', 'AP6'),  # Cuneiform vs Metatarsal
-            ('AP7', 'AP8'),  # Other metatarsals
-            # Regional ratios
-            ('AP1', 'AP5'),  # Hindfoot vs Midfoot
-            ('AP5', 'AP7'),  # Midfoot vs Forefoot
-            ('AP1', 'AP7'),  # Hindfoot vs Forefoot
-        ]
-
-        # Add ratios between all bones
-        for i, ap1 in enumerate(self.ap_list):
-            for ap2 in self.ap_list[i+1:]:
-                if (ap1, ap2) not in bone_pairs:
-                    bone_pairs.append((ap1, ap2))
-
-        # Compute ratios and perform statistical tests
+        # Define comparison groups
         comparisons = [
             ('Normal', 'by_disease'),
             ('Normal', 'by_category')
@@ -536,18 +527,214 @@ class GeometricAnalyzer:
         for base_group, comparison_type in comparisons:
             results['comparisons'][comparison_type] = {}
 
-            for ap1, ap2 in bone_pairs:
-                ratio_col = f'{ap1}_{ap2}_ratio'
+            for ap in self.ap_list:
+                orientation_col = f'{ap}_orientation'
+                anisotropy_col = f'{ap}_anisotropy'
 
-                # Compute ratios
-                valid_data = sizes_df.dropna(subset=[f'{ap1}_size', f'{ap2}_size']).copy()
+                # Get valid data
+                valid_data = orientations_df.dropna(subset=[orientation_col]).copy()
                 if len(valid_data) < 4:
                     continue
 
-                valid_data[ratio_col] = valid_data[f'{ap1}_size'] / valid_data[f'{ap2}_size']
+                # Get base group
+                base_mask = valid_data['label_disease'] == base_group
+                if not base_mask.any():
+                    continue
 
-                # Remove infinite/invalid ratios
-                valid_data = valid_data[np.isfinite(valid_data[ratio_col])]
+                base_orientations = valid_data[base_mask][orientation_col].values.reshape(-1, 1)
+
+                # Test against each disease/category
+                target_groups = (valid_data['label_disease'].unique()
+                               if comparison_type == 'by_disease'
+                               else valid_data['label_category'].unique())
+
+                for target_group in target_groups:
+                    if target_group == base_group:
+                        continue
+
+                    target_mask = (valid_data['label_disease'] == target_group
+                                 if comparison_type == 'by_disease'
+                                 else valid_data['label_category'] == target_group)
+
+                    if not target_mask.any():
+                        continue
+
+                    target_orientations = valid_data[target_mask][orientation_col].values.reshape(-1, 1)
+
+                    if len(base_orientations) < 2 or len(target_orientations) < 2:
+                        continue
+
+                    # Statistical analysis for orientation
+                    comparison_name = f"{base_group}_vs_{target_group}"
+
+                    # Circular statistics for angles (convert to unit vectors)
+                    def angular_difference(angles1, angles2):
+                        """Compute angular difference statistic"""
+                        mean1 = np.arctan2(np.mean(np.sin(angles1)), np.mean(np.cos(angles1)))
+                        mean2 = np.arctan2(np.mean(np.sin(angles2)), np.mean(np.cos(angles2)))
+                        diff = mean2 - mean1
+                        # Normalize to [-pi, pi]
+                        diff = np.arctan2(np.sin(diff), np.cos(diff))
+                        return np.degrees(diff)  # Return in degrees
+
+                    orientation_stats = self.stats_framework.comprehensive_test(
+                        base_orientations, target_orientations,
+                        statistic_func=angular_difference,
+                        comparison_name=f"{ap}_orientation_{comparison_name}"
+                    )
+
+                    # Anisotropy analysis (elongation/shape)
+                    base_anisotropy = valid_data[base_mask][anisotropy_col].values.reshape(-1, 1)
+                    target_anisotropy = valid_data[target_mask][anisotropy_col].values.reshape(-1, 1)
+
+                    anisotropy_stats = self.stats_framework.comprehensive_test(
+                        base_anisotropy, target_anisotropy,
+                        comparison_name=f"{ap}_anisotropy_{comparison_name}"
+                    )
+
+                    # Store results
+                    key = f"{ap}_{target_group}"
+                    results['comparisons'][comparison_type][key] = {
+                        'bone': ap,
+                        'comparison': comparison_name,
+                        'base_group': base_group,
+                        'target_group': target_group,
+                        'orientation_analysis': orientation_stats,
+                        'anisotropy_analysis': anisotropy_stats,
+                        'base_mean_orientation': np.degrees(np.mean(base_orientations)),
+                        'target_mean_orientation': np.degrees(np.mean(target_orientations)),
+                        'orientation_difference_deg': orientation_stats.get('effect_size', np.nan),
+                        'base_mean_anisotropy': np.mean(base_anisotropy),
+                        'target_mean_anisotropy': np.mean(target_anisotropy)
+                    }
+
+        # Apply FDR correction
+        self._apply_fdr_correction_rotation(results)
+
+        logger.info(f"Rotation analysis complete. Analyzed {len(self.ap_list)} bones.")
+        return results
+
+    def _apply_fdr_correction_rotation(self, results: Dict) -> None:
+        """Apply FDR correction to p-values for rotation analysis"""
+        all_pvals = []
+        pval_locations = []
+
+        # Collect all p-values
+        for comp_type, comparisons in results['comparisons'].items():
+            for key, data in comparisons.items():
+                for analysis_type in ['orientation_analysis', 'anisotropy_analysis']:
+                    if analysis_type in data and 'p_value' in data[analysis_type]:
+                        pval = data[analysis_type]['p_value']
+                        if np.isfinite(pval):
+                            all_pvals.append(pval)
+                            pval_locations.append((comp_type, key, analysis_type))
+
+        if len(all_pvals) == 0:
+            return
+
+        # Apply FDR correction
+        rejected, pvals_corrected, _, _ = multipletests(all_pvals, method='fdr_bh')
+
+        # Update results
+        for i, (comp_type, key, analysis_type) in enumerate(pval_locations):
+            results['comparisons'][comp_type][key][analysis_type]['p_value_fdr'] = pvals_corrected[i]
+            results['comparisons'][comp_type][key][analysis_type]['significant_fdr'] = rejected[i]
+
+    def compute_bone_aspect_ratios(self) -> pd.DataFrame:
+        """
+        Compute aspect ratios (height/width) for each bone using PCA eigenvalues
+
+        Returns:
+            DataFrame with aspect ratios per subject
+        """
+        if self.data is None:
+            raise ValueError("Data not loaded. Call load_data() first.")
+
+        aspect_ratios = []
+
+        for subject_id in self.data['subject_id'].unique():
+            subject_data = self.data[self.data['subject_id'] == subject_id]
+            metadata = subject_data.iloc[0]
+
+            subject_ratios = {
+                'subject_id': subject_id,
+                'label_disease': metadata.get('label_disease', 'Unknown'),
+                'label_category': metadata.get('label_category', 'Unknown')
+            }
+
+            # TODO(human): Implement aspect ratio computation
+            # For each bone (ap), compute the aspect ratio as:
+            # 1. Get bone coordinates
+            # 2. Center the coordinates
+            # 3. Compute covariance matrix
+            # 4. Get eigenvalues
+            # 5. aspect_ratio = max_eigenvalue / min_eigenvalue
+            # This ratio indicates bone elongation (1.0 = circular, >1.0 = elongated)
+
+            for ap in self.ap_list:
+                bone_coords = self.extract_bone_coordinates(subject_id, ap)
+
+                if len(bone_coords) > 2:
+                    # Center coordinates
+                    centroid = np.mean(bone_coords, axis=0)
+                    centered = bone_coords - centroid
+
+                    # Compute PCA
+                    cov_matrix = np.cov(centered.T)
+                    eigenvalues = np.linalg.eigvalsh(cov_matrix)
+
+                    # Aspect ratio = max/min eigenvalue
+                    aspect_ratio = eigenvalues[-1] / (eigenvalues[0] + 1e-10)
+                    subject_ratios[f'{ap}_aspect_ratio'] = aspect_ratio
+
+                    # Also store width and height for interpretation
+                    subject_ratios[f'{ap}_width'] = np.sqrt(eigenvalues[0])
+                    subject_ratios[f'{ap}_height'] = np.sqrt(eigenvalues[-1])
+                else:
+                    subject_ratios[f'{ap}_aspect_ratio'] = np.nan
+                    subject_ratios[f'{ap}_width'] = np.nan
+                    subject_ratios[f'{ap}_height'] = np.nan
+
+            aspect_ratios.append(subject_ratios)
+
+        return pd.DataFrame(aspect_ratios)
+
+    def analyze_relative_scale_ratios(self) -> Dict:
+        """
+        Analyze aspect ratios (height/width) for each bone
+        Reveals bone elongation patterns in disease
+
+        Returns:
+            Dict with aspect ratio statistical comparisons
+        """
+        logger.info("Analyzing aspect ratios (height/width)...")
+
+        # Compute aspect ratios
+        ratios_df = self.compute_bone_aspect_ratios()
+
+        if ratios_df.empty:
+            raise ValueError("No aspect ratio data computed")
+
+        results = {
+            'method': 'Aspect Ratio Analysis',
+            'description': 'Bone height/width ratios revealing elongation patterns',
+            'comparisons': {}
+        }
+
+        # Define comparison groups
+        comparisons = [
+            ('Normal', 'by_disease'),
+            ('Normal', 'by_category')
+        ]
+
+        for base_group, comparison_type in comparisons:
+            results['comparisons'][comparison_type] = {}
+
+            for ap in self.ap_list:
+                ratio_col = f'{ap}_aspect_ratio'
+
+                # Get valid data
+                valid_data = ratios_df.dropna(subset=[ratio_col]).copy()
                 if len(valid_data) < 4:
                     continue
 
@@ -582,34 +769,32 @@ class GeometricAnalyzer:
                     # Statistical analysis
                     comparison_name = f"{base_group}_vs_{target_group}"
 
-                    def ratio_statistic(x, y):
-                        """Compute effect size for ratio differences"""
-                        return compute_effect_size_hedges_g(x, y)
-
                     ratio_stats = self.stats_framework.comprehensive_test(
                         base_ratios, target_ratios,
-                        statistic_func=ratio_statistic,
-                        comparison_name=f"{ratio_col}_{comparison_name}"
+                        comparison_name=f"{ap}_aspect_ratio_{comparison_name}"
                     )
 
                     # Store results
-                    key = f"{ratio_col}_{target_group}"
+                    key = f"{ap}_{target_group}"
                     results['comparisons'][comparison_type][key] = {
-                        'bone_pair': f"{ap1}_{ap2}",
-                        'ratio_type': ratio_col,
+                        'bone': ap,
                         'comparison': comparison_name,
                         'base_group': base_group,
                         'target_group': target_group,
                         'base_mean_ratio': np.mean(base_ratios),
                         'target_mean_ratio': np.mean(target_ratios),
                         'ratio_change': np.mean(target_ratios) / np.mean(base_ratios),
+                        'base_mean_width': np.mean(valid_data[base_mask][f'{ap}_width']),
+                        'base_mean_height': np.mean(valid_data[base_mask][f'{ap}_height']),
+                        'target_mean_width': np.mean(valid_data[target_mask][f'{ap}_width']),
+                        'target_mean_height': np.mean(valid_data[target_mask][f'{ap}_height']),
                         'statistical_results': ratio_stats
                     }
 
         # Apply FDR correction
         self._apply_fdr_correction_ratios(results)
 
-        logger.info(f"Relative scale ratio analysis complete. Found {len(bone_pairs)} bone pairs.")
+        logger.info(f"Aspect ratio analysis complete. Analyzed {len(self.ap_list)} bones.")
         return results
 
     def _apply_fdr_correction_ratios(self, results: Dict) -> None:
