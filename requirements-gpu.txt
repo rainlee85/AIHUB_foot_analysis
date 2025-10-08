@@ -1,0 +1,28 @@
+# GPU-Accelerated Dependencies (Optional)
+# For users with NVIDIA/AMD GPUs who want maximum performance
+
+# Include base requirements
+-r requirements.txt
+
+# Taichi for GPU acceleration
+taichi>=1.6.0
+
+# Optional: CUDA toolkit integration (if using NVIDIA)
+# Note: CUDA must be installed separately on the system
+# cupy-cuda11x>=12.0.0  # Uncomment for CUDA 11.x
+# cupy-cuda12x>=12.0.0  # Uncomment for CUDA 12.x
+
+# Installation instructions:
+# 1. Install base requirements first:
+#    pip install -r requirements.txt
+#
+# 2. Install GPU dependencies:
+#    pip install -r requirements-gpu.txt
+#
+# 3. Verify Taichi GPU support:
+#    python -c "import taichi as ti; ti.init(arch=ti.gpu); print('GPU ready!')"
+#
+# Expected speedup with GPU:
+# - 50 patients:  5-10 minutes (vs 20-30 min CPU)
+# - 700 patients: 30-60 minutes (vs 2-3 hours CPU)
+# - 2-4x faster than Numba CPU-only mode

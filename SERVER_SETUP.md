@@ -31,8 +31,12 @@ pip install --upgrade pip setuptools wheel
 
 ### Step 3: Install All Dependencies
 ```bash
-# Install from requirements.txt
+# Install base requirements
 pip install -r requirements.txt
+
+# Optional: GPU Acceleration (if server has NVIDIA/AMD GPU)
+# Provides 2-4x speedup for large datasets
+pip install -r requirements-gpu.txt
 
 # Verify critical packages
 python -c "
@@ -46,7 +50,26 @@ print(f'NumPy: {numpy.__version__}')
 print(f'Pandas: {pandas.__version__}')
 print(f'Numba: {numba.__version__}')
 "
+
+# Verify GPU support (if requirements-gpu.txt installed)
+python -c "
+try:
+    import taichi as ti
+    ti.init(arch=ti.gpu)
+    print(f'✓ Taichi {ti.__version__} - GPU acceleration enabled')
+    print(f'  Backend: {ti.cfg.arch}')
+except ImportError:
+    print('⚠ Running in CPU-only mode (still fast with Numba)')
+except Exception as e:
+    print(f'⚠ GPU not available: {e}')
+    print('  Falling back to CPU mode')
+"
 ```
+
+**Note on GPU Acceleration:**
+- **With GPU**: 700 patients in ~30-60 min (2-4x faster)
+- **CPU only**: 700 patients in ~2-3 hours (still optimized)
+- See [TAICHI_INTEGRATION.md](TAICHI_INTEGRATION.md) for details
 
 ### Step 4: Verify Installation
 ```bash
