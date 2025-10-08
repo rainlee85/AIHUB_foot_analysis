@@ -10,27 +10,51 @@ This repository contains advanced statistical and geometric analysis tools for a
 
 ```
 20251008_footanalysis/
-├── preprocessing/          # Data preprocessing and Procrustes alignment
-│   └── preprocess_test_data.py
-├── statistical_analysis/   # Point-wise statistical testing
+├── preprocessing/                    # Complete preprocessing pipeline
+│   ├── data_generation/             # Test data generation
+│   │   └── generate_test_vtp_files.py
+│   ├── file_management/             # File organization utilities
+│   │   ├── copy_paste.py
+│   │   ├── file_mover_label.py
+│   │   ├── label_file_to_vtp.py
+│   │   └── move_above_20s.py
+│   ├── vtp_alignment/               # VTP alignment pipeline
+│   │   └── align_vtp_unified_pipeline.py
+│   ├── particle_conversion/         # VTP to particle conversion
+│   │   └── 2025_04_26_pycpd_vtp_to_particle_using_gpa_mean_shape.py
+│   ├── make_csv_with_landmarks.py   # Landmark mapping table
+│   ├── preprocess_foot_data.py      # Main preprocessing (legacy)
+│   ├── preprocess_test_data.py      # Fixed Procrustes alignment
+│   └── README.md                    # Preprocessing documentation
+├── statistical_analysis/            # Point-wise statistical testing
 │   └── stats_multi_level_optimized.py
-├── geometric_analysis/     # Geometric variation analysis
+├── geometric_analysis/              # Geometric variation analysis
 │   ├── geometric_analysis_framework.py
+│   ├── run_complete_geometric_analysis.py
 │   ├── test_geometric_analysis.py
 │   └── compare_global_vs_bonewise.py
-├── utils/                  # Utility functions (to be added)
-├── docs/                   # Documentation
+├── utils/                           # Utility functions
+│   └── visualization/               # Visualization tools
+│       ├── show_shape_particles.py
+│       └── show_shape_vtk.py
+├── docs/                            # Documentation
 │   └── CLAUDE.md
-├── requirements.txt        # Python dependencies
-└── README.md              # This file
+├── requirements.txt                 # Python dependencies
+└── README.md                       # This file
 ```
 
 ## Key Features
 
 ### 1. **Preprocessing Pipeline** (`preprocessing/`)
+- **Complete workflow**: From raw VTP files to aligned landmark data
+- **Test data generation**: Synthetic foot data with multi-label diseases
+- **File management**: Organization and filtering utilities
+- **VTP alignment**: Unified alignment pipeline
+- **Particle conversion**: GPA-based mean shape with CPD registration
 - **Procrustes alignment**: Global and bonewise strategies
-- **Quality control**: Duplicate handling, path normalization
-- **Data formats**: Supports .particles and VTP files
+- **Quality control**: Duplicate handling, path normalization, bug fixes
+- **Data formats**: Supports .particles, VTP, CSV, and Feather files
+- **Multi-label support**: Handles patient comorbidities correctly
 
 ### 2. **Statistical Analysis** (`statistical_analysis/`)
 - **Multi-level analysis**: Point-wise testing across demographic strata
@@ -62,11 +86,36 @@ pip install -r requirements.txt
 
 ## Quick Start
 
+### 0. Generate Test Data (Optional)
+```bash
+python preprocessing/data_generation/generate_test_vtp_files.py
+```
+
 ### 1. Preprocess Data
 ```bash
 python preprocessing/preprocess_test_data.py \
   --metadata_csv data/metadata.csv \
   --output_dir results/procrustes_results
+```
+
+**Full preprocessing pipeline:**
+```bash
+# File organization
+python preprocessing/file_management/move_above_20s.py
+
+# VTP alignment
+python preprocessing/vtp_alignment/align_vtp_unified_pipeline.py
+
+# Particle conversion
+python preprocessing/particle_conversion/2025_04_26_pycpd_vtp_to_particle_using_gpa_mean_shape.py
+
+# Create mapping table
+python preprocessing/make_csv_with_landmarks.py
+
+# Procrustes alignment
+python preprocessing/preprocess_test_data.py \
+  --metadata_csv output/mapping.csv \
+  --output_dir results/procrustes
 ```
 
 ### 2. Statistical Analysis
@@ -80,11 +129,23 @@ python statistical_analysis/stats_multi_level_optimized.py \
 
 ### 3. Geometric Analysis
 ```bash
-# Quick test
+# Quick test with reduced iterations
 python geometric_analysis/test_geometric_analysis.py
 
-# Compare global vs bonewise
+# Complete geometric analysis (all methods)
+python geometric_analysis/run_complete_geometric_analysis.py
+
+# Compare global vs bonewise alignment strategies
 python geometric_analysis/compare_global_vs_bonewise.py
+```
+
+### 4. Visualization
+```bash
+# View particle shapes
+python utils/visualization/show_shape_particles.py
+
+# View VTK shapes
+python utils/visualization/show_shape_vtk.py
 ```
 
 ## Analysis Types
