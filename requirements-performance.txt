@@ -1,0 +1,35 @@
+# Performance Optimization Dependencies (Optional)
+# For users who want maximum speed with modern libraries
+
+# Include base requirements
+-r requirements.txt
+
+# Polars for fast data operations (5-10x faster than Pandas)
+polars>=0.19.0
+
+# Taichi for GPU acceleration (2-4x faster with GPU)
+taichi>=1.6.0
+
+# Optional: PyArrow with optimized features
+pyarrow[pandas]>=13.0.0
+
+# Installation instructions:
+# 1. Install base requirements first:
+#    pip install -r requirements.txt
+#
+# 2. Install performance dependencies:
+#    pip install -r requirements-performance.txt
+#
+# 3. Verify installations:
+#    python -c "import polars as pl; print(f'Polars {pl.__version__}')"
+#    python -c "import taichi as ti; ti.init(arch=ti.gpu); print('Taichi GPU ready')"
+#
+# Expected improvements:
+# - Data loading: 5-10x faster (Polars)
+# - Statistical computations: 2-4x faster with GPU (Taichi)
+# - Overall pipeline: 1.5-2x faster combined
+#
+# Compatibility:
+# - Polars: Backward compatible (falls back to Pandas)
+# - Taichi: Auto-detects GPU, falls back to CPU
+# - Both optional - scripts work without them
