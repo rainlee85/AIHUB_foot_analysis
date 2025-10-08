@@ -84,6 +84,16 @@ foot_env\Scripts\activate  # On Windows
 pip install -r requirements.txt
 ```
 
+## 📚 Execution Guides
+
+**For server/production deployment:**
+- **[SERVER_SETUP.md](SERVER_SETUP.md)** - Complete server setup guide (internet → offline)
+- **[EXECUTION_ORDER.md](EXECUTION_ORDER.md)** - Detailed step-by-step pipeline execution
+
+**Quick command reference below** ⬇️
+
+---
+
 ## Quick Start
 
 ### 0. Generate Test Data (Optional)
