@@ -609,34 +609,64 @@ def ensure_labels(df: pd.DataFrame) -> pd.DataFrame:
     # Create sample_id for L/R foot identification
     df['sample_id'] = df['subject_id'].astype(str) + '_' + df['group_direction'].astype(str)
 
-    # Disease label inference
+    # Disease label inference - handles multiple diseases per patient
     disease_cols = [c for c in df.columns if c.startswith('group_disease_')]
 
     def find_disease_label(row):
+        """Extract all diseases for a patient (handles comorbidities)"""
+        diseases = []
+        is_normal = False
+
         for col in disease_cols:
-            disease_name = col.replace('group_disease_', '')
-            if row[col] == disease_name:
-                return disease_name
-        if 'group_disease_normal' in row and row['group_disease_normal'] == 'normal':
+            val = row[col]
+            if pd.notna(val):
+                if val == 'normal':
+                    is_normal = True
+                elif val not in ['other_disease']:
+                    # Actual disease name - clean it up
+                    disease_name = val.replace('_', ' ')
+                    diseases.append(disease_name)
+
+        # Return based on findings
+        if is_normal and not diseases:
             return 'normal'
-        return 'unknown'
+        elif diseases:
+            # Multiple diseases: join with semicolon
+            return '; '.join(sorted(set(diseases)))
+        else:
+            return 'unknown'
 
     if disease_cols:
         df['label_disease'] = df.apply(find_disease_label, axis=1)
     else:
         df['label_disease'] = 'unknown'
 
-    # Category label inference
+    # Category label inference - handles multiple categories per patient
     category_cols = [c for c in df.columns if c.startswith('group_category_')]
 
     def find_category_label(row):
+        """Extract all categories for a patient"""
+        categories = []
+        is_normal = False
+
         for col in category_cols:
-            category_name = col.replace('group_category_', '')
-            if row[col] == category_name:
-                return category_name
-        if 'group_category_normal' in row and row['group_category_normal'] == 'normal':
+            val = row[col]
+            if pd.notna(val):
+                if val == 'normal':
+                    is_normal = True
+                elif val not in ['other_catergory', 'other_category']:
+                    # Actual category name - clean it up
+                    category_name = val.replace('_', ' ')
+                    categories.append(category_name)
+
+        # Return based on findings
+        if is_normal and not categories:
             return 'normal'
-        return 'unknown'
+        elif categories:
+            # Multiple categories: join with semicolon
+            return '; '.join(sorted(set(categories)))
+        else:
+            return 'unknown'
 
     if category_cols:
         df['label_category'] = df.apply(find_category_label, axis=1)

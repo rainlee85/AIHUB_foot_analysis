@@ -221,38 +221,75 @@ class GeometricAnalyzer:
         return self.data
 
     def _extract_disease_labels(self):
-        """Extract disease and category labels from boolean columns"""
-        # Extract disease labels
+        """
+        Extract disease and category labels from one-hot encoded columns.
+        
+        Handles multiple diseases per patient by collecting all active labels.
+        Encoding: column value == disease name (patient has it)
+                  column value == 'other_disease' (patient doesn't have it)
+                  column value == 'normal' (normal for that category)
+        """
         disease_cols = [col for col in self.data.columns if col.startswith('group_disease_')]
         category_cols = [col for col in self.data.columns if col.startswith('group_category_')]
-
+        
         if disease_cols:
-            self.data['label_disease'] = 'Unknown'
-            for col in disease_cols:
-                disease_name = col.replace('group_disease_', '').replace('_', ' ').title()
-                # Check for disease-specific values (not 'other_disease' or 'normal')
-                unique_values = self.data[col].unique()
-                for val in unique_values:
-                    if val not in ['other_disease', 'normal'] and pd.notna(val):
-                        mask = self.data[col] == val
-                        self.data.loc[mask, 'label_disease'] = disease_name
-                # Handle normal cases
-                normal_mask = self.data[col] == 'normal'
-                self.data.loc[normal_mask, 'label_disease'] = 'Normal'
-
+            # Collect all diseases for each row
+            disease_labels = []
+            for idx in range(len(self.data)):
+                diseases = []
+                is_normal = False
+                
+                for col in disease_cols:
+                    val = self.data.iloc[idx][col]
+                    if pd.notna(val):
+                        if val == 'normal':
+                            is_normal = True
+                        elif val not in ['other_disease']:
+                            # Actual disease name - clean it up
+                            disease_name = val.replace('_', ' ').title()
+                            diseases.append(disease_name)
+                
+                # Assign label based on findings
+                if is_normal and not diseases:
+                    disease_labels.append('Normal')
+                elif diseases:
+                    # Multiple diseases: join with semicolon
+                    disease_labels.append('; '.join(sorted(set(diseases))))
+                else:
+                    # No normal flag and no diseases found (shouldn't happen)
+                    disease_labels.append('Unknown')
+            
+            self.data['label_disease'] = disease_labels
+        
         if category_cols:
-            self.data['label_category'] = 'Unknown'
-            for col in category_cols:
-                category_name = col.replace('group_category_', '').replace('_', ' ').title()
-                # Check for category-specific values (not 'other_category' or 'normal')
-                unique_values = self.data[col].unique()
-                for val in unique_values:
-                    if val not in ['other_catergory', 'other_category', 'normal'] and pd.notna(val):
-                        mask = self.data[col] == val
-                        self.data.loc[mask, 'label_category'] = category_name
-                # Handle normal cases
-                normal_mask = self.data[col] == 'normal'
-                self.data.loc[normal_mask, 'label_category'] = 'Normal'
+            # Collect all categories for each row
+            category_labels = []
+            for idx in range(len(self.data)):
+                categories = []
+                is_normal = False
+                
+                for col in category_cols:
+                    val = self.data.iloc[idx][col]
+                    if pd.notna(val):
+                        if val == 'normal':
+                            is_normal = True
+                        elif val not in ['other_catergory', 'other_category']:
+                            # Actual category name - clean it up
+                            category_name = val.replace('_', ' ').title()
+                            categories.append(category_name)
+                
+                # Assign label based on findings
+                if is_normal and not categories:
+                    category_labels.append('Normal')
+                elif categories:
+                    # Multiple categories: join with semicolon
+                    category_labels.append('; '.join(sorted(set(categories))))
+                else:
+                    # No normal flag and no categories found (shouldn't happen)
+                    category_labels.append('Unknown')
+            
+            self.data['label_category'] = category_labels
+
 
     def extract_bone_coordinates(self, subject_id: str, ap: str) -> np.ndarray:
         """Extract coordinates for a specific bone from a subject"""
